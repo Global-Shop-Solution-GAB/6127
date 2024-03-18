@@ -1,0 +1,115 @@
+Program.Sub.Preflight.Start
+Program.External.Include.Library("GCG_6127_ErrorHandling.lib")
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: BixRB
+'Date: 29 Sept 2020
+'GCG_6127_Gen_Serial.g2u
+'Werk-Brau Co Inc.
+'From the Work Order Serial maintenance screen, this program will generate custom serial numbers based on preset conditions
+V.Local.bManualSerial.Declare
+F.Intrinsic.Control.Try
+
+F.Intrinsic.Control.If(V.Caller.Hook,=,31825)
+	'SERS007 - Manual Serial Number Entry Screen - Populate Hook
+	'V.Passed.000002 - Exit Button
+	'V.Passed.000022 - Add Serial Button
+	'V.Passed.000023 - Change Serial Button
+	'V.Passed.000024 - Clear Serial Button
+	'V.Passed.000025 - Delete Serial Button
+	'V.Passed.000026 - Serial Numbers Needed
+	'V.Passed.000027 - Serial Numbers Entered
+	'V.Passed.000030 - Panel Screen (?????)
+	'V.Passed.000082 - Serial Number Text Box
+	'V.Passed.009000 - Job Number
+	'V.Passed.009001 - Suffix Number
+	'V.Passed.AUX001 - Serial Numbers BDF
+	'Check to see if manual serial override is on (trick question: in order to reach this screen the option HAS to be turned on)
+	F.Global.General.ReadOption(401137,0,True,0,V.Local.bManualSerial)
+	F.Intrinsic.Control.If(V.Local.bManualSerial)
+		'Check ORDER_TO_WO table to set the Serial Prefix
+		F.Intrinsic.Control.CallSub(CheckOrderNo,"Job",V.Passed.009000,"Suffix",V.Passed.009001)
+		'V.Args.SerialPrefix
+		
+		'Load BDF to add the serial numbers
+		F.Intrinsic.BDF.Load("SERIAL_NUMBERS","AUX001")
+		
+		'Loop through the needed serial numbers and add them to BDF
+		F.Intrinsic.Control.CallSub(SetSerialNumbers,"BDFName","SERIAL_NUMBERS","Qty",V.Passed.000026,"SerialPrefix",V.Args.SerialPrefix)
+		
+		'Save BDF to screen
+		F.Intrinsic.BDF.Save("SERIAL_NUMBERS","AUX001")
+		
+		'Lock controls
+'		F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000082,"LOCK","1")
+'		F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000022,"LOCK","1")
+'		F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000023,"LOCK","1")
+'		F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000024,"LOCK","1")
+'		F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000025,"LOCK","1")
+'		F.Intrinsic.UI.ChangeCallerProperty(v.Passed.AUX001,"LOCK","1")
+'		F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000030,"LOCK","1")
+'		F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000002,"LOCK","1")
+		
+		'Set Serial Numbers Entered to Needed Serial Numbers 
+		V.Passed.000027.Set(V.Passed.000026)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMessage,"ScriptFile",V.Caller.ScriptFile,"CurrentSubroutine",V.Ambient.CurrentSubroutine)
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.CheckOrderNo.Start
+'V.Args.Job, V.Args.Suffix
+V.Local.sSQL.Declare
+V.Local.sSerialPrefix.Declare
+F.Intrinsic.Control.Try
+
+F.Intrinsic.String.Build("select SALES_ORDER, SALES_ORDER_LINE from V_JOB_HEADER where JOB = '{0}' and SUFFIX = '{1}' and PARENT_WO = '';",V.Args.Job,V.Args.Suffix,V.Local.sSQL)
+F.ODBC.Connection!conOrderCheck.OpenCompanyConnection
+F.ODBC.Connection!conOrderCheck.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+F.ODBC.Connection!conOrderCheck.Close
+
+F.Intrinsic.String.Split(V.Local.sSQL,"*!*",V.Local.sSQL)
+F.Intrinsic.Control.If(V.Local.sSQL(0),=,"0000000",or,V.Local.sSQL(0).Trim,=,"",V.Ambient.ExecuteAndReturnEOF,=,True)
+	'No order found, return Job as Key
+	F.Intrinsic.String.Build("{0}-{1}",V.Args.Job,V.Args.Suffix.Long,V.Local.sSerialPrefix)
+F.Intrinsic.Control.Else
+	'Order found, return Order No and Line as Key
+	F.Intrinsic.String.Build("{0}-{1}",V.Local.sSQL(0),V.Local.sSQL(1).Long,V.Local.sSerialPrefix)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Variable.AddRV("SerialPrefix",V.Local.sSerialPrefix)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMessage,"ScriptFile",V.Caller.ScriptFile,"CurrentSubroutine",V.Ambient.CurrentSubroutine)
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+Program.Sub.CheckOrderNo.End
+
+Program.Sub.SetSerialNumbers.Start
+'V.Args.BDFName, V.Args.Qty, V.Args.SerialPrefix
+V.Local.sSerial.Declare
+V.Local.sRow.Declare
+V.Local.iCnt.Declare
+F.Intrinsic.Control.Try
+
+F.Intrinsic.Control.For(V.Local.iCnt,1,V.Args.Qty,1)
+	'Build serial numbers and add them to BDF
+	F.Intrinsic.String.Build("{0}-{1}",V.Args.SerialPrefix,V.Local.iCnt,V.Local.sSerial)
+	F.Intrinsic.String.Build("{0}|~|",V.Local.sSerial,V.Local.sRow)
+	F.Intrinsic.BDF.WriteRow(V.Args.BDFName,V.Local.sRow)
+F.Intrinsic.Control.Next(V.Local.iCnt)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMessage,"ScriptFile",V.Caller.ScriptFile,"CurrentSubroutine",V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.SetSerialNumbers.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$bbaker$}$20201007170213682$}$pM7xsHplA2E9VCTenDTJ47gi1rF/t66WKAbhD0bK3TpGoINQ6A4a/dCir0j40AacAdQPjpAT+0s=
+Program.Sub.Comments.End
